@@ -1,0 +1,132 @@
+#include <Arduino.h>
+#include <esp_now.h>
+#include <WiFi.h>
+#include <Wire.h> // Додаємо бібліотеку Wire
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+
+#define CHANNEL 1
+
+/** This is all the data about the peer **/
+esp_now_peer_info_t slave;
+
+/** The all important data! **/
+uint8_t data = 0;
+
+// Прототипи функцій
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status);
+void ScanForSlave();
+
+
+
+Adafruit_MPU6050 mpu;
+sensors_event_t a, g, temp;
+
+uint32_t lastSendTime = 0;
+
+float ys = 0.0;
+float xs = 0.0;
+float zs = 0.0;
+
+// Біаси гіроскопа
+float gyro_bias_x = 0.0;
+float gyro_bias_y = 0.0;
+float gyro_bias_z = 0.0;
+
+
+int num_measurements = 500;
+void GiroLoop();
+void GiroSetup();
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+  esp_now_init();
+  esp_now_register_send_cb(OnDataSent);
+  ScanForSlave(); // WiFi.macAddress()
+  esp_now_add_peer(&slave);
+  GiroSetup();
+  
+}
+
+void loop() {
+  GiroLoop();
+  int qq = 70;
+  data = qq + xs * 100;
+  esp_now_send(slave.peer_addr, &data, sizeof(data));
+
+  
+}
+
+/** Scan for slaves in AP mode and ad as peer if found **/
+void ScanForSlave() {
+  int8_t scanResults = WiFi.scanNetworks();
+
+  for (int i = 0; i < scanResults; ++i) {
+    String SSID = WiFi.SSID(i);
+    String BSSIDstr = WiFi.BSSIDstr(i);
+
+    if (SSID.indexOf("RX") == 0) {
+
+      int mac[6];
+      if ( 6 == sscanf(BSSIDstr.c_str(), "%x:%x:%x:%x:%x:%x",  &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5] ) ) {
+        for (int ii = 0; ii < 6; ++ii ) {
+          slave.peer_addr[ii] = (uint8_t) mac[ii];
+        }
+      }
+
+      slave.channel = CHANNEL; // pick a channel
+      slave.encrypt = 0; // no encryption
+      break;
+    }
+  }
+}
+
+/** callback when data is sent from Master to Slave **/
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("I sent my data -> ");
+  Serial.println(data);
+  
+}
+void GiroLoop(){
+    if((millis() - lastSendTime) >= 10) {
+        mpu.getEvent(&a, &g, &temp);
+        // Віднімання біасу
+        float gyro_x = g.gyro.x - gyro_bias_x;
+        float gyro_y = g.gyro.y - gyro_bias_y;
+        float gyro_z = g.gyro.z - gyro_bias_z;
+        xs += gyro_x * 0.01;
+        ys += gyro_y * 0.01;
+        zs += gyro_z * 0.01;
+		lastSendTime = millis();
+    }
+}
+void GiroSetup(){
+
+    if (!mpu.begin())
+    {
+        Serial.println("Failed to find MPU6050 chip");
+        while (1)
+        {
+            delay(10);
+        }
+    }
+
+    mpu.setAccelerometerRange(MPU6050_RANGE_16_G);
+    mpu.setGyroRange(MPU6050_RANGE_2000_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_260_HZ);
+    delay(100);
+
+    // Вимірювання середнього значення біасу гіроскопа
+    for (int i = 0; i < num_measurements; i++) {
+        mpu.getEvent(&a, &g, &temp);
+        gyro_bias_x = gyro_bias_x + g.gyro.x;
+        gyro_bias_y += g.gyro.y;
+        gyro_bias_z += g.gyro.z;
+        Serial.println(i);
+        delay(10); // Затримка для стабілізації значення
+    }
+    gyro_bias_x /= num_measurements;
+    gyro_bias_y /= num_measurements;
+    gyro_bias_z /= num_measurements;
+
+}
