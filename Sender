@@ -11,7 +11,7 @@
 esp_now_peer_info_t slave;
 
 /** The all important data! **/
-uint8_t data = 0;
+float data[2] = {1,2};
 
 // Прототипи функцій
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status);
@@ -37,6 +37,8 @@ float gyro_bias_z = 0.0;
 int num_measurements = 500;
 void GiroLoop();
 void GiroSetup();
+
+int i = 0;
 void setup() {
   Serial.begin(115200);
   WiFi.mode(WIFI_STA);
@@ -50,11 +52,14 @@ void setup() {
 
 void loop() {
   GiroLoop();
-  int qq = 70;
-  data = qq + xs * 100;
-  esp_now_send(slave.peer_addr, &data, sizeof(data));
+/* int qq = 70;
+  if (i == 0){ data = qq + xs * 100 + 100; i=1;
+  if (data <= 101) {data = 101;}}
+  else   
+  if (i == 1){   data = zs * 100 ;i=0;
+  if (data >= 100) {data = 100;}}*/
 
-  
+
 }
 
 /** Scan for slaves in AP mode and ad as peer if found **/
@@ -84,21 +89,31 @@ void ScanForSlave() {
 /** callback when data is sent from Master to Slave **/
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   Serial.print("I sent my data -> ");
-  Serial.println(data);
+  
   
 }
 void GiroLoop(){
-    if((millis() - lastSendTime) >= 10) {
-        mpu.getEvent(&a, &g, &temp);
-        // Віднімання біасу
-        float gyro_x = g.gyro.x - gyro_bias_x;
-        float gyro_y = g.gyro.y - gyro_bias_y;
-        float gyro_z = g.gyro.z - gyro_bias_z;
-        xs += gyro_x * 0.01;
-        ys += gyro_y * 0.01;
-        zs += gyro_z * 0.01;
-		lastSendTime = millis();
-    }
+  if((millis() - lastSendTime) >= 10) {
+      mpu.getEvent(&a, &g, &temp);
+      // Віднімання біасу
+      float gyro_x = g.gyro.x - gyro_bias_x;
+      float gyro_y = g.gyro.y - gyro_bias_y;
+      float gyro_z = g.gyro.z - gyro_bias_z;
+      xs += gyro_x * 0.01;
+      ys += gyro_y * 0.01;
+      zs += gyro_z * 0.01;
+      
+  data[0] = xs * 180 / M_PI;
+  data[0] = data[0] - data[0]*2;
+  data[1] = zs * 180 / M_PI ; 
+  if (data[0] > 180 ){data[0] = 180;}
+  if (data[0] < 0 ){data[0] = 0;}
+   if (data[1] > 180 ){data[1] = 180;}
+  if (data[1] < 0 ){data[1] = 0;}
+  esp_now_send(slave.peer_addr, (uint8_t *)data, sizeof(data));
+  lastSendTime = millis();
+  }
+  
 }
 void GiroSetup(){
 
